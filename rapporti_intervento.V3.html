@@ -356,6 +356,7 @@
         document.addEventListener('DOMContentLoaded', () => {
             // === CONFIGURAZIONE ===
             const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxwYmbABswvjz6dQX8nlCNAoAI49KDXyHUH6aX0hPXGjhlCJIDApsMjEjxPYlMQ8IpegA/exec'; // ✅ CONFIGURATO
+            console.log('🔗 Google Apps Script URL:', SCRIPT_URL);
 
             // === MAPPATURA UTENTI PER BUONI LAVORO ===
             const USER_CODE_MAPPING = {
@@ -384,7 +385,7 @@
 
             // Canvas per firme
             const canvasCommittente = document.getElementById('firma-committente');
-            const ctxCommittente = canvasCommittente.getContext('2d');
+            const ctxCommittente = canvasCommittente.getContext('2d', { willReadFrequently: true }); // ✅ Risolve Canvas2D warning
             const clearCommittente = document.getElementById('clear-firma-committente');
             const statusCommittente = document.getElementById('firma-committente-status');
 
@@ -857,10 +858,15 @@
                     });
                     
                     script.src = `${SCRIPT_URL}?${params.toString()}`;
-                    script.onerror = () => {
+                    script.onerror = (error) => {
+                        console.error('❌ Script Error Details:', {
+                            url: script.src,
+                            error: error,
+                            timestamp: new Date().toISOString()
+                        });
                         delete window[callbackName];
                         if (script.parentNode) document.head.removeChild(script);
-                        reject(new Error('🌐 Errore di connessione:\n\n• Verifica la connessione internet\n• Il Google Apps Script potrebbe essere temporaneamente non disponibile\n• Riprova tra qualche minuto'));
+                        reject(new Error('🌐 Errore di connessione al Google Apps Script:\n\n• URL: ' + script.src + '\n• Verifica che lo script sia pubblicato\n• Controlla che sia "Execute as: Me" e "Access: Anyone"\n• Potrebbe essere temporaneamente non disponibile'));
                     };
                     
                     document.head.appendChild(script);
@@ -897,10 +903,16 @@
                     });
                     
                     script.src = `${SCRIPT_URL}?${params.toString()}`;
-                    script.onerror = () => {
+                    script.onerror = (error) => {
+                        console.error('❌ Upload Signature Error:', {
+                            url: script.src,
+                            error: error,
+                            signatureType: signatureType,
+                            timestamp: new Date().toISOString()
+                        });
                         delete window[callbackName];
                         if (script.parentNode) document.head.removeChild(script);
-                        reject(new Error('🖊️ Errore upload firma:\n\n• Problema di connessione durante l\'invio\n• La firma potrebbe essere troppo grande\n• Riprova o disegna una firma più semplice'));
+                        reject(new Error('🖊️ Errore upload firma al Google Apps Script:\n\n• URL: ' + script.src + '\n• Verifica configurazione script Google\n• La firma potrebbe essere troppo grande\n• Riprova o disegna una firma più semplice'));
                     };
                     
                     document.head.appendChild(script);
@@ -964,7 +976,53 @@
                 }
             });
 
+            // === TEST CONNETTIVITÀ GOOGLE APPS SCRIPT ===
+            async function testGoogleAppsScript() {
+                try {
+                    console.log('🔍 Test connettività Google Apps Script...');
+                    const testUrl = `${SCRIPT_URL}?callback=testCallback&action=ping&data=${encodeURIComponent(JSON.stringify({test: true}))}`;
+                    console.log('📡 Test URL:', testUrl);
+                    
+                    return new Promise((resolve, reject) => {
+                        const callbackName = 'testCallback' + Date.now();
+                        
+                        window[callbackName] = function(response) {
+                            delete window[callbackName];
+                            document.head.removeChild(script);
+                            console.log('✅ Google Apps Script: CONNESSO', response);
+                            resolve(response);
+                        };
+                        
+                        const script = document.createElement('script');
+                        script.src = testUrl.replace('testCallback', callbackName);
+                        script.onerror = () => {
+                            delete window[callbackName];
+                            if (script.parentNode) document.head.removeChild(script);
+                            console.error('❌ Google Apps Script: NON RAGGIUNGIBILE');
+                            reject(new Error('Script non raggiungibile'));
+                        };
+                        
+                        document.head.appendChild(script);
+                        
+                        // Timeout test
+                        setTimeout(() => {
+                            if (window[callbackName]) {
+                                delete window[callbackName];
+                                if (script.parentNode) document.head.removeChild(script);
+                                console.warn('⏰ Google Apps Script: TIMEOUT');
+                                reject(new Error('Timeout'));
+                            }
+                        }, 10000);
+                    });
+                } catch (error) {
+                    console.error('❌ Errore test Google Apps Script:', error);
+                }
+            }
+
             // === INIZIALIZZAZIONE DIRETTA APP ===
+            // Test iniziale connettività
+            testGoogleAppsScript();
+            
             // Inizializza data corrente
             const today = getCurrentDate();
             dataInizioInput.value = today;
@@ -1136,17 +1194,38 @@
             
             // Non mostrare il prompt se è già installata o è stata mostrata di recente
             if (isInStandaloneMode() || installPromptShown) {
+                console.log('📱 PWA: Già installata o prompt già mostrato');
                 return;
             }
+            
+            console.log('📱 PWA: Controllo installazione...', {
+                platform: platform,
+                deferredPrompt: !!deferredPrompt,
+                isStandalone: isInStandaloneMode()
+            });
             
             // Su mobile, mostra sempre le istruzioni dopo un po'
             if (platform.isMobile) {
                 setTimeout(() => {
                     if (!installPromptShown && !isInStandaloneMode()) {
+                        console.log('📱 PWA: Mostro istruzioni mobile');
                         showInstallPrompt();
                         installPromptShown = true;
                     }
-                }, 10000); // Dopo 10 secondi
+                }, 5000); // Dopo 5 secondi invece di 10
+            }
+            // Su desktop, mostra istruzioni anche senza deferredPrompt dopo un po'
+            else {
+                setTimeout(() => {
+                    if (!installPromptShown && !deferredPrompt && !isInStandaloneMode()) {
+                        console.log('📱 PWA: Mostro istruzioni desktop (fallback)');
+                        const mobileInstallInstructions = document.getElementById('mobile-install-instructions');
+                        if (mobileInstallInstructions) {
+                            mobileInstallInstructions.classList.remove('hidden');
+                            installPromptShown = true;
+                        }
+                    }
+                }, 8000); // Dopo 8 secondi
             }
         }
         

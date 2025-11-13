@@ -953,6 +953,7 @@
             
             // Mostra utente corrente e configura logout
             const currentUserData = userManager.getCurrentUser();
+            currentUsername = currentUserData.username || 'utente'; // ✅ CORREZIONE: Imposta currentUsername
             currentUser.textContent = `Connesso: ${currentUserData.displayName || currentUserData.username || 'Utente'} (${currentUserData.role || 'utente'})`;
             
             // Logout button
@@ -1076,45 +1077,57 @@
         
         // Gestisce il prompt automatico di installazione
         window.addEventListener('beforeinstallprompt', (e) => {
-            console.log('📱 PWA: Prompt installazione disponibile');
-            e.preventDefault();
-            deferredPrompt = e;
-            showInstallPrompt();
+            try {
+                console.log('📱 PWA: Prompt installazione disponibile');
+                e.preventDefault();
+                deferredPrompt = e;
+                showInstallPrompt();
+            } catch (error) {
+                console.warn('📱 PWA: Errore gestione beforeinstallprompt:', error);
+            }
         });
         
         // Click sul pulsante installa
         const installAppButton = document.getElementById('install-app-button');
         if (installAppButton) {
             installAppButton.addEventListener('click', async () => {
-                if (deferredPrompt) {
-                    console.log('📱 PWA: Avvio installazione...');
-                    deferredPrompt.prompt();
-                    
-                    const { outcome } = await deferredPrompt.userChoice;
-                    console.log('📱 PWA: Scelta utente:', outcome);
-                    
-                    if (outcome === 'accepted') {
-                        console.log('📱 PWA: Installazione accettata');
-                    } else {
-                        console.log('📱 PWA: Installazione rifiutata');
+                try {
+                    if (deferredPrompt) {
+                        console.log('📱 PWA: Avvio installazione...');
+                        deferredPrompt.prompt();
+                        
+                        const { outcome } = await deferredPrompt.userChoice;
+                        console.log('📱 PWA: Scelta utente:', outcome);
+                        
+                        if (outcome === 'accepted') {
+                            console.log('📱 PWA: Installazione accettata');
+                        } else {
+                            console.log('📱 PWA: Installazione rifiutata');
+                        }
+                        
+                        deferredPrompt = null;
+                        installAppButton.classList.add('hidden');
                     }
-                    
-                    deferredPrompt = null;
-                    installAppButton.classList.add('hidden');
+                } catch (error) {
+                    console.error('📱 PWA: Errore durante installazione:', error);
                 }
             });
         }
         
         // Rileva quando l'app è stata installata
         window.addEventListener('appinstalled', () => {
-            console.log('📱 PWA: App installata con successo');
-            deferredPrompt = null;
-            
-            const installAppButton = document.getElementById('install-app-button');
-            const mobileInstallInstructions = document.getElementById('mobile-install-instructions');
-            
-            if (installAppButton) installAppButton.classList.add('hidden');
-            if (mobileInstallInstructions) mobileInstallInstructions.classList.add('hidden');
+            try {
+                console.log('📱 PWA: App installata con successo');
+                deferredPrompt = null;
+                
+                const installAppButton = document.getElementById('install-app-button');
+                const mobileInstallInstructions = document.getElementById('mobile-install-instructions');
+                
+                if (installAppButton) installAppButton.classList.add('hidden');
+                if (mobileInstallInstructions) mobileInstallInstructions.classList.add('hidden');
+            } catch (error) {
+                console.warn('📱 PWA: Errore gestione appinstalled:', error);
+            }
         });
         
         // Mostra prompt di installazione quando appropriato

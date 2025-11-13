@@ -695,11 +695,16 @@
             // === FUNZIONI INVIO DATI ===
             async function checkInternetConnection() {
                 try {
-                    const response = await fetch('https://www.google.com/favicon.ico', { 
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 5000);
+                    
+                    await fetch('https://www.google.com/favicon.ico', { 
                         mode: 'no-cors',
                         cache: 'no-store',
-                        signal: AbortSignal.timeout(5000)
+                        signal: controller.signal
                     });
+                    
+                    clearTimeout(timeoutId);
                     return true;
                 } catch {
                     return false;
@@ -758,10 +763,10 @@
 
                 try {
                     // Verifica connessione internet prima di procedere
-                    showLoading('Verifica connessione internet...');
+                    showLoading('Verifica connessione...');
                     const isConnected = await checkInternetConnection();
                     if (!isConnected) {
-                        throw new Error('🌐 Nessuna connessione internet:\\n\\n• Verifica di essere connesso a internet\\n• Riprova quando la connessione sarà stabile');
+                        throw new Error('🌐 Nessuna connessione internet:\n\n• Verifica di essere connesso a internet\n• Riprova quando la connessione sarà stabile');
                     }
                     
                     showLoading('Invio rapporto in corso...');

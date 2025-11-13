@@ -2,7 +2,7 @@
   "name": "SMIRT - Rapporti di Intervento",
   "short_name": "SMIRT",
   "description": "App professionale per la gestione dei rapporti di intervento tecnico con firme digitali",
-  "start_url": "./rapporti_intervento.V3.html",
+  "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#1f2937",
@@ -37,9 +37,9 @@
   "shortcuts": [
     {
       "name": "Nuovo Rapporto",
-      "short_name": "Nuovo",
-      "description": "Crea un nuovo rapporto di intervento",
-      "url": "./rapporti_intervento.V3.html",
+      "short_name": "Nuovo", 
+      "description": "Accedi all'app per creare un nuovo rapporto di intervento",
+      "url": "./index.html",
       "icons": [
         {
           "src": "./SMIRT_Icon_Final.svg",

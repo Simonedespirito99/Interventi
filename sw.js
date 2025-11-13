@@ -1,23 +1,33 @@
-const CACHE_NAME = 'smirt-pwa-v2'; // ⬆️ Incrementato per nuove modifiche
+const CACHE_NAME = 'smirt-pwa-v3'; // ⬆️ Incrementato per correzioni errori
 const urlsToCache = [
   './',
   './rapporti_intervento.V3.html',
+  './index.html',
   './manifest.json',
-  './SMIRT_Icon_Final.svg', // ✅ Aggiornato a SVG
-  'https://cdn.tailwindcss.com'
+  './SMIRT_Icon_Final.svg',
+  './js/user-manager.js',
+  './config/users.json'
 ];
 
-// Install event - cache resources
+// Install event - cache resources with better error handling
 self.addEventListener('install', (event) => {
   console.log('[SW] Install evento');
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then((cache) => {
         console.log('[SW] Cache aperta');
-        return cache.addAll(urlsToCache);
+        // Cache resources individually to handle failures gracefully
+        return Promise.allSettled(
+          urlsToCache.map(url => {
+            return cache.add(url).catch(error => {
+              console.warn(`[SW] Impossibile cachare ${url}:`, error);
+              return null; // Continue with other resources
+            });
+          })
+        );
       })
       .then(() => {
-        console.log('[SW] Risorse cachate con successo');
+        console.log('[SW] Risorse cachate (con possibili fallimenti gestiti)');
         self.skipWaiting();
       })
       .catch((error) => {
@@ -46,7 +56,7 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch event - serve from cache when offline
+// Fetch event - serve from cache when offline with improved error handling
 self.addEventListener('fetch', (event) => {
   // Skip non-GET requests
   if (event.request.method !== 'GET') {
@@ -55,7 +65,9 @@ self.addEventListener('fetch', (event) => {
 
   // Skip external APIs (Google Sheets, etc.)
   if (event.request.url.includes('script.google.com') || 
-      event.request.url.includes('googleapis.com')) {
+      event.request.url.includes('googleapis.com') ||
+      event.request.url.includes('chrome-extension') ||
+      event.request.url.includes('tailwindcss.com')) {
     return;
   }
 
@@ -70,7 +82,7 @@ self.addEventListener('fetch', (event) => {
         
         console.log('[SW] Fetching from network:', event.request.url);
         return fetch(event.request).then((response) => {
-          // Don't cache non-successful responses
+          // Don't cache non-successful responses or non-basic types
           if (!response || response.status !== 200 || response.type !== 'basic') {
             return response;
           }
@@ -78,10 +90,13 @@ self.addEventListener('fetch', (event) => {
           // Clone the response
           const responseToCache = response.clone();
 
-          // Add to cache
+          // Add to cache with error handling
           caches.open(CACHE_NAME)
             .then((cache) => {
-              cache.put(event.request, responseToCache);
+              return cache.put(event.request, responseToCache);
+            })
+            .catch((error) => {
+              console.warn('[SW] Errore aggiornamento cache:', error);
             });
 
           return response;

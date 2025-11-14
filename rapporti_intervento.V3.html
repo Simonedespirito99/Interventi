@@ -697,10 +697,15 @@
             async function submitDataToServer(data) {
                 return new Promise((resolve, reject) => {
                     const callbackName = 'jsonpCallback' + Date.now();
+                    let timeoutId;
+                    
+                    console.log('🔄 Invio dati al server...', { url: SCRIPT_URL, data: data });
                     
                     window[callbackName] = function(response) {
+                        console.log('✅ Risposta ricevuta:', response);
+                        clearTimeout(timeoutId);
                         delete window[callbackName];
-                        document.head.removeChild(script);
+                        if (script && script.parentNode) document.head.removeChild(script);
                         resolve(response);
                     };
                     
@@ -711,21 +716,30 @@
                         data: encodeURIComponent(JSON.stringify(data))
                     });
                     
-                    script.src = `${SCRIPT_URL}?${params.toString()}`;
+                    const fullUrl = `${SCRIPT_URL}?${params.toString()}`;
+                    console.log('📡 URL chiamata:', fullUrl.substring(0, 150) + '...');
+                    
+                    script.src = fullUrl;
                     script.onerror = (error) => {
                         console.error('❌ Errore connessione Google Apps Script:', error);
+                        clearTimeout(timeoutId);
                         delete window[callbackName];
-                        if (script.parentNode) document.head.removeChild(script);
-                        reject(new Error('Errore di connessione al Google Apps Script. Verifica la configurazione.'));
+                        if (script && script.parentNode) document.head.removeChild(script);
+                        reject(new Error('Errore di connessione. Controlla: 1) Connessione internet 2) URL Google Apps Script 3) Permessi script'));
+                    };
+                    
+                    script.onload = () => {
+                        console.log('📜 Script caricato, attendo risposta...');
                     };
                     
                     document.head.appendChild(script);
                     
-                    setTimeout(() => {
+                    timeoutId = setTimeout(() => {
+                        console.error('⏰ Timeout invio dati');
                         if (window[callbackName]) {
                             delete window[callbackName];
-                            if (script.parentNode) document.head.removeChild(script);
-                            reject(new Error('Timeout durante l\'invio dati. Riprova.'));
+                            if (script && script.parentNode) document.head.removeChild(script);
+                            reject(new Error('Timeout (30s). Il Google Apps Script non risponde. Verifica che sia pubblicato e accessibile.'));
                         }
                     }, 30000);
                 });
@@ -734,39 +748,55 @@
             async function uploadSignatureToServer(mud, signatureType, signatureBase64) {
                 return new Promise((resolve, reject) => {
                     const callbackName = 'jsonpCallback' + Date.now();
+                    let timeoutId;
+                    
+                    console.log('🖊️ Upload firma...', { mud, signatureType, size: signatureBase64.length });
                     
                     window[callbackName] = function(response) {
+                        console.log('✅ Firma caricata:', response);
+                        clearTimeout(timeoutId);
                         delete window[callbackName];
-                        document.head.removeChild(script);
+                        if (script && script.parentNode) document.head.removeChild(script);
                         resolve(response);
                     };
                     
                     const script = document.createElement('script');
+                    const uploadData = {
+                        mud: mud,
+                        signatureType: signatureType,
+                        signatureBase64: signatureBase64
+                    };
+                    
                     const params = new URLSearchParams({
                         callback: callbackName,
                         action: 'upload-signature',
-                        data: encodeURIComponent(JSON.stringify({
-                            mud: mud,
-                            signatureType: signatureType,
-                            signatureBase64: signatureBase64
-                        }))
+                        data: encodeURIComponent(JSON.stringify(uploadData))
                     });
                     
-                    script.src = `${SCRIPT_URL}?${params.toString()}`;
+                    const fullUrl = `${SCRIPT_URL}?${params.toString()}`;
+                    console.log('📡 URL upload firma:', fullUrl.substring(0, 150) + '...');
+                    
+                    script.src = fullUrl;
                     script.onerror = (error) => {
                         console.error('❌ Errore upload firma:', error);
+                        clearTimeout(timeoutId);
                         delete window[callbackName];
-                        if (script.parentNode) document.head.removeChild(script);
-                        reject(new Error('Errore upload firma. Verifica configurazione Google Apps Script.'));
+                        if (script && script.parentNode) document.head.removeChild(script);
+                        reject(new Error('Errore upload firma. Controlla: 1) Dimensione firma 2) Connessione 3) Permessi Google Drive'));
+                    };
+                    
+                    script.onload = () => {
+                        console.log('📜 Script upload caricato, attendo risposta...');
                     };
                     
                     document.head.appendChild(script);
                     
-                    setTimeout(() => {
+                    timeoutId = setTimeout(() => {
+                        console.error('⏰ Timeout upload firma');
                         if (window[callbackName]) {
                             delete window[callbackName];
-                            if (script.parentNode) document.head.removeChild(script);
-                            reject(new Error('Timeout upload firma. Riprova con una firma più semplice.'));
+                            if (script && script.parentNode) document.head.removeChild(script);
+                            reject(new Error('Timeout upload firma (30s). La firma potrebbe essere troppo grande o il servizio non risponde.'));
                         }
                     }, 30000);
                 });
@@ -827,17 +857,22 @@
                     };
 
                     console.log('📤 Invio dati:', formData);
+                    console.log('🔗 URL configurato:', SCRIPT_URL);
 
                     // FASE 1: Invio dati principali
                     showLoading('Invio dati principali...');
+                    console.log('🚀 FASE 1: Invio dati senza firma');
                     const response1 = await submitDataToServer(formData);
+                    console.log('📋 Risposta FASE 1:', response1);
                     if (response1.status !== 'success') {
                         throw new Error(response1.message || 'Errore invio dati principali');
                     }
 
                     // FASE 2: Upload firma committente
                     showLoading('Caricamento firma committente...');
+                    console.log('🚀 FASE 2: Upload firma');
                     const response2 = await uploadSignatureToServer(formData.mud, 'committente', formData.firmaCommittente);
+                    console.log('📋 Risposta FASE 2:', response2);
                     if (response2.status !== 'success') {
                         throw new Error(response2.message || 'Errore caricamento firma committente');
                     }

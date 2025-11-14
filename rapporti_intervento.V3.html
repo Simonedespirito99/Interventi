@@ -29,7 +29,7 @@
     <meta name="msapplication-TileImage" content="./SMIRT_Icon_Final.svg">
     
     <title>App Rapporti Intervento</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,typography,aspect-ratio,line-clamp"></script>
     <style>
         body {
             font-family: 'Inter', sans-serif;
@@ -867,8 +867,58 @@
                 } catch (error) {
                     hideLoading();
                     console.error('Errore invio:', error);
-                    showAlert('Errore', 'Errore durante l\'invio: ' + error.message, '❌');
-                    return false;
+                    
+                    // Se non è già in modalità offline, prova fallback automatico
+                    if (!isOfflineMode && (error.message.includes('CORS') || error.message.includes('connessione'))) {
+                        console.warn('🔄 Tentativo fallback automatico modalità offline...');
+                        try {
+                            isOfflineMode = true;
+                            googleScriptAvailable = false;
+                            
+                            // Prepara i dati per il salvataggio offline
+                            const formData = {
+                                user: currentUsername,
+                                mud: mudInput.value.trim(),
+                                riferimento: riferimentoInput.value.trim(),
+                                luogo: luogoInput.value.trim(),
+                                dataInizio: dataInizioInput.value,
+                                dataFine: dataFineInput.value,
+                                descrizione: descrizioneInput.value.trim(),
+                                materiali: materialiInput.value.trim(),
+                                firmaCommittente: canvasToDataURL(canvasCommittente)
+                            };
+                            
+                            showLoading('Fallback modalità offline...');
+                            const result = await saveOfflineData(formData);
+                            hideLoading();
+                            
+                            showAlert('Salvato Offline', `Errore connessione risolto con modalità offline.\n\nBuono di Lavoro: ${result.buonoLavoro}\n\nI dati sono salvati localmente.`, '📴');
+                            
+                            // Reset form
+                            interventoForm.reset();
+                            clearSignature(ctxCommittente, statusCommittente);
+                            const today = getCurrentDate();
+                            dataInizioInput.value = today;
+                            dataFineInput.value = today;
+                            
+                            // Mostra indicatori offline
+                            const offlineIndicator = document.getElementById('offline-indicator');
+                            const offlineSection = document.getElementById('offline-section');
+                            if (offlineIndicator) offlineIndicator.classList.remove('hidden');
+                            if (offlineSection) offlineSection.classList.remove('hidden');
+                            loadOfflineData();
+                            
+                            return true;
+                            
+                        } catch (offlineError) {
+                            console.error('Errore anche nel fallback offline:', offlineError);
+                            showAlert('Errore', 'Errore durante invio e fallback offline: ' + error.message, '❌');
+                            return false;
+                        }
+                    } else {
+                        showAlert('Errore', 'Errore durante invio: ' + error.message, '❌');
+                        return false;
+                    }
                 }
             }
 
@@ -894,11 +944,20 @@
                         console.error('❌ Script Error Details:', {
                             url: script.src,
                             error: error,
-                            timestamp: new Date().toISOString()
+                            timestamp: new Date().toISOString(),
+                            possibleCauses: ['CORS policy', 'Network error', 'Script not published', 'Invalid URL']
                         });
                         delete window[callbackName];
                         if (script.parentNode) document.head.removeChild(script);
-                        reject(new Error('🌐 Errore di connessione al Google Apps Script:\n\n• URL: ' + script.src + '\n• Verifica che lo script sia pubblicato\n• Controlla che sia "Execute as: Me" e "Access: Anyone"\n• Potrebbe essere temporaneamente non disponibile'));
+                        
+                        // Attiva automaticamente modalità offline se non già attiva
+                        if (!isOfflineMode) {
+                            console.warn('🔄 Fallback automatico a modalità offline per errore invio');
+                            isOfflineMode = true;
+                            googleScriptAvailable = false;
+                        }
+                        
+                        reject(new Error('🌐 Errore di connessione al Google Apps Script:\n\n• Possibile errore CORS\n• Script Google non raggiungibile\n• Verifica configurazione script\n• Fallback automatico modalità offline'));
                     };
                     
                     document.head.appendChild(script);
@@ -1012,8 +1071,22 @@
             async function testGoogleAppsScript() {
                 try {
                     console.log('🔍 Test connettività Google Apps Script...');
+                    
+                    // Prima prova un test semplice senza JSONP
+                    try {
+                        const simpleTest = await fetch(SCRIPT_URL, { 
+                            method: 'GET',
+                            mode: 'no-cors',
+                            cache: 'no-cache'
+                        });
+                        console.log('📡 Test base connessione:', simpleTest.type);
+                    } catch (e) {
+                        console.log('📡 Test base non riuscito (normale):', e.message);
+                    }
+                    
+                    // Test JSONP principale
                     const testUrl = `${SCRIPT_URL}?callback=testCallback&action=ping&data=${encodeURIComponent(JSON.stringify({test: true}))}`;
-                    console.log('📡 Test URL:', testUrl);
+                    console.log('📡 Test JSONP URL:', testUrl);
                     
                     return new Promise((resolve, reject) => {
                         const callbackName = 'testCallback' + Date.now();
@@ -1029,19 +1102,25 @@
                         
                         const script = document.createElement('script');
                         script.src = testUrl.replace('testCallback', callbackName);
-                        script.onerror = () => {
+                        
+                        script.onerror = (error) => {
+                            console.error('❌ JSONP Error Details:', {
+                                error: error,
+                                url: script.src,
+                                message: 'Possibile problema CORS o script non raggiungibile'
+                            });
                             delete window[callbackName];
                             if (script.parentNode) document.head.removeChild(script);
                             console.warn('⚠️ Google Apps Script: NON RAGGIUNGIBILE - Attivazione modalità offline');
                             googleScriptAvailable = false;
                             isOfflineMode = true;
                             showOfflineWarning();
-                            resolve({ status: 'offline', message: 'Modalità offline attivata' });
+                            resolve({ status: 'offline', message: 'Modalità offline attivata per errore CORS/connessione' });
                         };
                         
                         document.head.appendChild(script);
                         
-                        // Timeout test
+                        // Timeout test ridotto per feedback più veloce
                         setTimeout(() => {
                             if (window[callbackName]) {
                                 delete window[callbackName];
@@ -1052,7 +1131,7 @@
                                 showOfflineWarning();
                                 resolve({ status: 'timeout', message: 'Modalità offline attivata per timeout' });
                             }
-                        }, 8000); // Timeout ridotto a 8 secondi
+                        }, 5000); // Timeout ridotto a 5 secondi per feedback più rapido
                     });
                 } catch (error) {
                     console.error('❌ Errore test Google Apps Script:', error);
@@ -1071,7 +1150,7 @@
                 if (offlineSection) offlineSection.classList.remove('hidden');
                 
                 setTimeout(() => {
-                    showAlert('Modalità Offline', 'Google Apps Script non raggiungibile.\n\nPuoi comunque:\n• Compilare il form\n• Salvare bozze\n• Testare le firme\n\nI dati verranno salvati localmente.', '📴');
+                    showAlert('Modalità Offline', 'Google Apps Script non raggiungibile.\n\nPossibili cause:\n• Errore CORS (configurazione script)\n• Script non pubblicato correttamente\n• Connessione internet\n\nModalità offline attivata:\n• Puoi compilare il form\n• Salvare bozze\n• Testare le firme\n\nI dati verranno salvati localmente.', '📴');
                 }, 2000);
                 
                 loadOfflineData();

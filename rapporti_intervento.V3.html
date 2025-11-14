@@ -843,7 +843,7 @@
                 try {
                     showLoading('Invio rapporto in corso...');
 
-                    // Prepara i dati
+                    // Prepara i dati SENZA firma (FASE 1)
                     const formData = {
                         user: currentUsername,
                         mud: mudInput.value.trim(),
@@ -852,9 +852,12 @@
                         dataInizio: dataInizioInput.value,
                         dataFine: dataFineInput.value,
                         descrizione: descrizioneInput.value.trim(),
-                        materiali: materialiInput.value.trim(),
-                        firmaCommittente: canvasToDataURL(canvasCommittente)
+                        materiali: materialiInput.value.trim()
+                        // firmaCommittente verrà inviata separatamente nella FASE 2
                     };
+                    
+                    // Prepara la firma per la FASE 2
+                    const firmaCommittenteBase64 = canvasToDataURL(canvasCommittente);
 
                     console.log('📤 Invio dati:', formData);
                     console.log('🔗 URL configurato:', SCRIPT_URL);
@@ -871,7 +874,7 @@
                     // FASE 2: Upload firma committente
                     showLoading('Caricamento firma committente...');
                     console.log('🚀 FASE 2: Upload firma');
-                    const response2 = await uploadSignatureToServer(formData.mud, 'committente', formData.firmaCommittente);
+                    const response2 = await uploadSignatureToServer(formData.mud, 'committente', firmaCommittenteBase64);
                     console.log('📋 Risposta FASE 2:', response2);
                     if (response2.status !== 'success') {
                         throw new Error(response2.message || 'Errore caricamento firma committente');

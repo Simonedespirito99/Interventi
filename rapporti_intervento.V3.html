@@ -109,6 +109,9 @@
             </button>
             <div class="flex items-center space-x-4">
                 <span id="current-user" class="text-sm text-gray-600 dark:text-gray-300"></span>
+                <span id="offline-indicator" class="text-xs px-2 py-1 bg-orange-100 text-orange-800 rounded-full hidden">
+                    📴 Offline
+                </span>
                 <button id="logout-btn" class="text-sm text-red-600 hover:text-red-800 px-3 py-1 border border-red-300 rounded-md hover:bg-red-50">
                     Logout
                 </button>
@@ -252,6 +255,19 @@
                     </div>
                 </div>
             </div>
+            
+            <!-- Sezione Dati Offline -->
+            <div id="offline-section" class="hidden">
+                <h3 class="text-lg font-semibold mb-2 text-orange-600">📴 Dati Offline</h3>
+                <div id="offline-list" class="space-y-2">
+                    <div class="text-gray-500 text-sm italic">
+                        Nessun dato offline
+                    </div>
+                </div>
+                <button id="view-offline-data" class="w-full px-3 py-2 text-sm bg-orange-600 text-white rounded-lg hover:bg-orange-700 mt-2">
+                    Visualizza Tutti i Dati Offline
+                </button>
+            </div>
         </div>
         
         <!-- Footer Menu (Logout) -->
@@ -357,6 +373,10 @@
             // === CONFIGURAZIONE ===
             const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxwYmbABswvjz6dQX8nlCNAoAI49KDXyHUH6aX0hPXGjhlCJIDApsMjEjxPYlMQ8IpegA/exec'; // ✅ CONFIGURATO
             console.log('🔗 Google Apps Script URL:', SCRIPT_URL);
+            
+            // === MODALITÀ OFFLINE DI EMERGENZA ===
+            let isOfflineMode = false;
+            let googleScriptAvailable = false;
 
             // === MAPPATURA UTENTI PER BUONI LAVORO ===
             const USER_CODE_MAPPING = {
@@ -763,54 +783,66 @@
                 }
 
                 try {
-                    // Verifica connessione internet prima di procedere
-                    showLoading('Verifica connessione...');
-                    const isConnected = await checkInternetConnection();
-                    if (!isConnected) {
-                        throw new Error('🌐 Nessuna connessione internet:\n\n• Verifica di essere connesso a internet\n• Riprova quando la connessione sarà stabile');
-                    }
-                    
                     showLoading('Invio rapporto in corso...');
 
-                    // Prepara i dati (senza firma per ora)
+                    // Prepara i dati
                     const formData = {
                         user: currentUsername,
                         mud: mudInput.value.trim(),
                         riferimento: riferimentoInput.value.trim(),
                         luogo: luogoInput.value.trim(),
-                        dataInizio: dataInizioInput.value,  // MODIFICATO
-                        dataFine: dataFineInput.value,      // MODIFICATO
+                        dataInizio: dataInizioInput.value,
+                        dataFine: dataFineInput.value,
                         descrizione: descrizioneInput.value.trim(),
-                        materiali: materialiInput.value.trim()
-                        // buonoLavoro: Verrà generato automaticamente dal server
+                        materiali: materialiInput.value.trim(),
+                        firmaCommittente: canvasToDataURL(canvasCommittente)
                     };
 
-                    // FASE 1: Invio dati principali con retry automatico
-                    const response1 = await retryOperation(async () => {
-                        showLoading('Invio dati principali...');
-                        return await submitDataToServer(formData);
-                    });
-                    if (response1.status !== 'success') {
-                        throw new Error(response1.message || 'Errore invio dati principali');
-                    }
+                    let result;
+                    
+                    if (isOfflineMode || !googleScriptAvailable) {
+                        // MODALITÀ OFFLINE
+                        console.log('📴 Invio in modalità offline');
+                        showLoading('Salvataggio offline...');
+                        result = await saveOfflineData(formData);
+                    } else {
+                        // MODALITÀ ONLINE
+                        console.log('🌐 Invio in modalità online');
+                        
+                        // Verifica connessione internet prima di procedere
+                        showLoading('Verifica connessione...');
+                        const isConnected = await checkInternetConnection();
+                        if (!isConnected) {
+                            throw new Error('🌐 Nessuna connessione internet');
+                        }
 
-                    // FASE 2: Upload firma committente con retry automatico
-                    const firmaCommittenteData = canvasToDataURL(canvasCommittente);
-                    const response2 = await retryOperation(async () => {
-                        showLoading('Caricamento firma committente...');
-                        return await uploadSignatureToServer(formData.mud, 'committente', firmaCommittenteData);
-                    });
-                    if (response2.status !== 'success') {
-                        throw new Error(response2.message || 'Errore caricamento firma committente');
+                        // FASE 1: Invio dati principali con retry automatico
+                        const response1 = await retryOperation(async () => {
+                            showLoading('Invio dati principali...');
+                            return await submitDataToServer(formData);
+                        });
+                        if (response1.status !== 'success') {
+                            throw new Error(response1.message || 'Errore invio dati principali');
+                        }
+
+                        // FASE 2: Upload firma committente con retry automatico
+                        const response2 = await retryOperation(async () => {
+                            showLoading('Caricamento firma committente...');
+                            return await uploadSignatureToServer(formData.mud, 'committente', formData.firmaCommittente);
+                        });
+                        if (response2.status !== 'success') {
+                            throw new Error(response2.message || 'Errore caricamento firma committente');
+                        }
+                        
+                        result = response1.buonoLavoro ? response1 : response2;
                     }
 
                     hideLoading();
 
-                    // Mostra il buono di lavoro generato se presente nella risposta
-                    let successMessage = 'Rapporto inviato con successo!';
-                    if (response1.buonoLavoro || response2.buonoLavoro) {
-                        const buonoLavoro = response1.buonoLavoro || response2.buonoLavoro;
-                        successMessage += `\n\nBuono di Lavoro: ${buonoLavoro}`;
+                    // Mostra il buono di lavoro generato
+                    let successMessage = isOfflineMode ? 'Rapporto salvato offline!' : 'Rapporto inviato con successo!';
+                    if (result.buonoLavoro) {
+                        successMessage += `\n\nBuono di Lavoro: ${result.buonoLavoro}`;
                     }
 
                     showAlert('Successo', successMessage, '✅');
@@ -827,8 +859,8 @@
                     
                     // Reimposta date
                     const today = getCurrentDate();
-                    dataInizioInput.value = today;  // MODIFICATO
-                    dataFineInput.value = today;    // MODIFICATO
+                    dataInizioInput.value = today;
+                    dataFineInput.value = today;
 
                     return true;
 
@@ -990,6 +1022,8 @@
                             delete window[callbackName];
                             document.head.removeChild(script);
                             console.log('✅ Google Apps Script: CONNESSO', response);
+                            googleScriptAvailable = true;
+                            isOfflineMode = false;
                             resolve(response);
                         };
                         
@@ -998,8 +1032,11 @@
                         script.onerror = () => {
                             delete window[callbackName];
                             if (script.parentNode) document.head.removeChild(script);
-                            console.error('❌ Google Apps Script: NON RAGGIUNGIBILE');
-                            reject(new Error('Script non raggiungibile'));
+                            console.warn('⚠️ Google Apps Script: NON RAGGIUNGIBILE - Attivazione modalità offline');
+                            googleScriptAvailable = false;
+                            isOfflineMode = true;
+                            showOfflineWarning();
+                            resolve({ status: 'offline', message: 'Modalità offline attivata' });
                         };
                         
                         document.head.appendChild(script);
@@ -1009,14 +1046,110 @@
                             if (window[callbackName]) {
                                 delete window[callbackName];
                                 if (script.parentNode) document.head.removeChild(script);
-                                console.warn('⏰ Google Apps Script: TIMEOUT');
-                                reject(new Error('Timeout'));
+                                console.warn('⏰ Google Apps Script: TIMEOUT - Attivazione modalità offline');
+                                googleScriptAvailable = false;
+                                isOfflineMode = true;
+                                showOfflineWarning();
+                                resolve({ status: 'timeout', message: 'Modalità offline attivata per timeout' });
                             }
-                        }, 10000);
+                        }, 8000); // Timeout ridotto a 8 secondi
                     });
                 } catch (error) {
                     console.error('❌ Errore test Google Apps Script:', error);
+                    isOfflineMode = true;
+                    showOfflineWarning();
+                    return { status: 'error', message: 'Modalità offline attivata per errore' };
                 }
+            }
+            
+            // === MODALITÀ OFFLINE ===
+            function showOfflineWarning() {
+                // Mostra indicatore offline
+                const offlineIndicator = document.getElementById('offline-indicator');
+                const offlineSection = document.getElementById('offline-section');
+                if (offlineIndicator) offlineIndicator.classList.remove('hidden');
+                if (offlineSection) offlineSection.classList.remove('hidden');
+                
+                setTimeout(() => {
+                    showAlert('Modalità Offline', 'Google Apps Script non raggiungibile.\n\nPuoi comunque:\n• Compilare il form\n• Salvare bozze\n• Testare le firme\n\nI dati verranno salvati localmente.', '📴');
+                }, 2000);
+                
+                loadOfflineData();
+            }
+            
+            function generateOfflineWorkOrder(user) {
+                const userCode = USER_CODE_MAPPING[user] || 'X';
+                const timestamp = Date.now().toString().slice(-4);
+                return `${userCode}${timestamp}-OFFLINE`;
+            }
+            
+            async function saveOfflineData(data) {
+                const offlineData = {
+                    ...data,
+                    buonoLavoro: generateOfflineWorkOrder(data.user),
+                    timestamp: new Date().toISOString(),
+                    status: 'offline'
+                };
+                
+                // Salva in localStorage
+                const offlineReports = JSON.parse(localStorage.getItem('smirt_offline_reports') || '[]');
+                offlineReports.push(offlineData);
+                localStorage.setItem('smirt_offline_reports', JSON.stringify(offlineReports));
+                
+                console.log('📴 Dati salvati offline:', offlineData);
+                return {
+                    status: 'success',
+                    message: 'Dati salvati in modalità offline',
+                    buonoLavoro: offlineData.buonoLavoro
+                };
+            }
+            
+            function loadOfflineData() {
+                const offlineReports = JSON.parse(localStorage.getItem('smirt_offline_reports') || '[]');
+                const offlineList = document.getElementById('offline-list');
+                
+                if (!offlineList) return;
+                
+                offlineList.innerHTML = '';
+                
+                if (offlineReports.length === 0) {
+                    offlineList.innerHTML = '<div class="text-gray-500 text-sm italic">Nessun dato offline</div>';
+                    return;
+                }
+                
+                // Mostra ultimi 3 rapporti offline
+                const recentReports = offlineReports.slice(-3).reverse();
+                recentReports.forEach(report => {
+                    const reportElement = document.createElement('div');
+                    reportElement.className = 'p-2 bg-orange-50 dark:bg-orange-900 rounded border';
+                    reportElement.innerHTML = `
+                        <div class="text-sm font-medium">${report.mud || 'N/A'}</div>
+                        <div class="text-xs text-gray-600">${report.buonoLavoro}</div>
+                        <div class="text-xs text-gray-500">${new Date(report.timestamp).toLocaleString()}</div>
+                    `;
+                    offlineList.appendChild(reportElement);
+                });
+            }
+            
+            function showAllOfflineData() {
+                const offlineReports = JSON.parse(localStorage.getItem('smirt_offline_reports') || '[]');
+                
+                if (offlineReports.length === 0) {
+                    showAlert('Dati Offline', 'Nessun rapporto salvato offline.', '📴');
+                    return;
+                }
+                
+                let message = `Rapporti offline salvati (${offlineReports.length}):\n\n`;
+                offlineReports.slice(-10).forEach((report, index) => {
+                    message += `${index + 1}. ${report.mud} - ${report.buonoLavoro}\n`;
+                    message += `   ${new Date(report.timestamp).toLocaleDateString()}\n\n`;
+                });
+                
+                if (offlineReports.length > 10) {
+                    message += `... e altri ${offlineReports.length - 10} rapporti`;
+                }
+                
+                showAlert('Dati Offline', message, '📴');
             }
 
             // === INIZIALIZZAZIONE DIRETTA APP ===
@@ -1052,6 +1185,12 @@
             newInterventoButton.addEventListener('click', showNewInterventoModal);
             newInterventoCancel.addEventListener('click', hideNewInterventoModal);
             newInterventoConfirm.addEventListener('click', createNewIntervento);
+            
+            // Dati offline
+            const viewOfflineDataButton = document.getElementById('view-offline-data');
+            if (viewOfflineDataButton) {
+                viewOfflineDataButton.addEventListener('click', showAllOfflineData);
+            }
 
             // Modal alerts
             document.getElementById('alert-cancel').addEventListener('click', hideAlert);

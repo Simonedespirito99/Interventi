@@ -520,9 +520,6 @@
         // Controllo autenticazione all'avvio
         (async () => {
             await userManager.loadUsers();
-            
-            // FORZA LOGOUT PER TESTING - rimuovi in produzione
-            userManager.logout();
 
             if (!userManager.isSessionValid()) {
                 // Utente non autenticato, reindirizza alla pagina di login
